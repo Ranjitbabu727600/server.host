@@ -1,0 +1,4 @@
+# DARKHOST-VORTEX Python dependencies
+# (Python modules only; system tools handled separately)
+
+requests
