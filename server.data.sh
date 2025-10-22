@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # DARKHOST-VORTEX v2.0 - Universal Smart Hosting
@@ -610,7 +611,7 @@ if [[ "$ngrok_choice" =~ ^[Yy]$ ]]; then
         echo -e "\e[1;36m[*] Starting Ngrok tunnel... Please wait\e[0m"
         
         # Start ngrok in background
-        ngrok http $port --log=stdout > /tmp/ngrok_$$.log 2>&1 &
+        ngrok http $port --log=stdout > /tmp/ngrok_$.log 2>&1 &
         ngrok_pid=$!
         
         # Wait for ngrok to start
@@ -632,8 +633,8 @@ if [[ "$ngrok_choice" =~ ^[Yy]$ ]]; then
             fi
             
             # Method 2: Check log file if API failed
-            if [ -z "$ngrok_url" ] && [ -f /tmp/ngrok_$$.log ]; then
-                ngrok_url=$(grep -o 'url=https://[^[:space:]]*' /tmp/ngrok_$$.log | cut -d= -f2 | head -1)
+            if [ -z "$ngrok_url" ] && [ -f /tmp/ngrok_$.log ]; then
+                ngrok_url=$(grep -o 'url=https://[^[:space:]]*' /tmp/ngrok_$.log | cut -d= -f2 | head -1)
             fi
             
             # If still not found, wait and retry
@@ -659,10 +660,130 @@ if [[ "$ngrok_choice" =~ ^[Yy]$ ]]; then
         fi
         
         # Cleanup log
-        rm -f /tmp/ngrok_$$.log 2>/dev/null
+        rm -f /tmp/ngrok_$.log 2>/dev/null
     else
         echo -e "\e[1;31m[!] Ngrok not installed!\e[0m"
         echo -e "\e[1;33m[!] Install from: https://ngrok.com/download\e[0m"
+        echo ""
+    fi
+fi
+
+# CLOUDFLARED TUNNEL
+echo -e "\e[1;35m╔═══════════════════════════════════════════════╗\e[0m"
+echo -e "\e[1;35m║  Want Cloudflare Tunnel? (y/n)               ║\e[0m"
+echo -e "\e[1;35m╚═══════════════════════════════════════════════╝\e[0m"
+read -t 15 -p ">>> " cloudflared_choice || cloudflared_choice="n"
+echo ""
+
+if [[ "$cloudflared_choice" =~ ^[Yy]$ ]]; then
+    cloudflared_pid=""
+    
+    # Check if cloudflared is installed
+    if ! command -v cloudflared &> /dev/null; then
+        echo -e "\e[1;33m[!] Cloudflared not found. Installing...\e[0m"
+        echo ""
+        
+        # Detect architecture
+        arch=$(uname -m)
+        case "$arch" in
+            x86_64)
+                cloudflared_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb"
+                ;;
+            aarch64|arm64)
+                cloudflared_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb"
+                ;;
+            armv7l|armhf)
+                cloudflared_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm.deb"
+                ;;
+            *)
+                echo -e "\e[1;31m[!] Unsupported architecture: $arch\e[0m"
+                cloudflared_url=""
+                ;;
+        esac
+        
+        if [ -n "$cloudflared_url" ]; then
+            echo -e "\e[1;36m[*] Downloading cloudflared for $arch...\e[0m"
+            
+            # Download to temp directory
+            temp_deb="/tmp/cloudflared_$.deb"
+            
+            if wget -q --show-progress "$cloudflared_url" -O "$temp_deb" 2>&1; then
+                echo -e "\e[1;36m[*] Installing cloudflared...\e[0m"
+                
+                # Try to install with dpkg
+                if sudo dpkg -i "$temp_deb" > /dev/null 2>&1; then
+                    echo -e "\e[1;32m[✓] Cloudflared installed successfully!\e[0m"
+                    echo ""
+                else
+                    # Fix dependencies if needed
+                    echo -e "\e[1;33m[*] Fixing dependencies...\e[0m"
+                    sudo apt-get install -f -y > /dev/null 2>&1
+                    echo -e "\e[1;32m[✓] Cloudflared installed successfully!\e[0m"
+                    echo ""
+                fi
+                
+                # Cleanup
+                rm -f "$temp_deb"
+            else
+                echo -e "\e[1;31m[!] Failed to download cloudflared\e[0m"
+                echo -e "\e[1;33m[!] Install manually from: https://github.com/cloudflare/cloudflared\e[0m"
+                echo ""
+            fi
+        fi
+    fi
+    
+    # Check again if cloudflared is available
+    if command -v cloudflared &> /dev/null; then
+        echo -e "\e[1;36m[*] Starting Cloudflare Tunnel... Please wait\e[0m"
+        echo -e "\e[1;33m[*] Creating tunnel to localhost:$port\e[0m"
+        echo ""
+        
+        # Start cloudflared tunnel
+        cloudflared tunnel --url localhost:$port > /tmp/cloudflared_$.log 2>&1 &
+        cloudflared_pid=$!
+        
+        # Wait for tunnel to establish
+        sleep 8
+        
+        # Try to get the tunnel URL
+        cf_url=""
+        max_attempts=10
+        attempt=0
+        
+        while [ $attempt -lt $max_attempts ] && [ -z "$cf_url" ]; do
+            attempt=$((attempt + 1))
+            
+            if [ -f /tmp/cloudflared_$.log ]; then
+                # Look for the trycloudflare.com URL in logs
+                cf_url=$(grep -o 'https://[^[:space:]]*trycloudflare.com' /tmp/cloudflared_$.log | head -1)
+                
+                # Alternative pattern
+                if [ -z "$cf_url" ]; then
+                    cf_url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cloudflared_$.log | head -1)
+                fi
+            fi
+            
+            if [ -z "$cf_url" ] && [ $attempt -lt $max_attempts ]; then
+                sleep 2
+            fi
+        done
+        
+        if [ -n "$cf_url" ]; then
+            echo -e "\e[1;32m╔═══════════════════════════════════════════════╗\e[0m"
+            echo -e "\e[1;32m║    ☁️  CLOUDFLARE TUNNEL ESTABLISHED         ║\e[0m"
+            echo -e "\e[1;32m╚═══════════════════════════════════════════════╝\e[0m"
+            echo ""
+            echo -e "\e[1;32m   $cf_url\e[0m"
+            echo ""
+            echo -e "\e[1;33m   Free & Secure - Share anywhere! ☁️\e[0m"
+            echo ""
+        else
+            echo -e "\e[1;33m[!] Could not detect Cloudflare URL\e[0m"
+            echo -e "\e[1;33m[!] Check log: /tmp/cloudflared_$.log\e[0m"
+            echo ""
+        fi
+    else
+        echo -e "\e[1;31m[!] Cloudflared installation failed\e[0m"
         echo ""
     fi
 fi
@@ -678,3 +799,4 @@ done
 
 echo -e "\e[1;31m[!] Server stopped unexpectedly\e[0m"
 cleanup
+        
